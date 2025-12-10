@@ -1,110 +1,176 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Meet Pulse AI — Live</title>
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body{font-family:Arial,margin:0;padding:18px;display:flex;flex-direction:column;align-items:center}
-    h1{margin:0 0 8px 0}
-    #bpmBig{font-size:34px;font-weight:700;margin:6px 0;text-align:center}
-    #chartContainer{width:90%;max-width:800px}
-    canvas{display:block;margin:0 auto}
-    .controls{margin-top:12px;text-align:center}
-    button,select{margin:0 6px;padding:8px 12px}
-    .small{font-size:0.9rem;color:#666}
-  </style>
+<meta charset="utf-8">
+<title>Meet Pulse AI</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+h1 {
+  margin-bottom: 10px;
+}
+#bpmBig {
+  font-size: 36px;
+  font-weight: bold;
+  margin: 6px 0;
+  text-align: center;
+}
+#chartContainer {
+  width: 90%;
+  max-width: 800px;
+}
+canvas {
+  display: block;
+  margin: 0 auto;
+}
+.controls {
+  margin-top: 15px;
+  text-align: center;
+}
+button, select {
+  margin: 0 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.small {
+  font-size: 0.9rem;
+  color: #666;
+  text-align: center;
+  margin-top: 4px;
+}
+</style>
 </head>
 <body>
-  <h1>Meet Pulse AI</h1>
-  <div id="bpmBig">-- BPM</div>
-  <div id="chartContainer">
-    <canvas id="hrChart" width="800" height="320"></canvas>
-    <div class="small" id="lastSeen">Last: --</div>
-  </div>
 
-  <div class="controls">
-    <button id="startSession">Start Session</button>
-    <button id="stopSession" disabled>Stop & Save</button>
-    <select id="label">
-      <option value="resting">Resting</option>
-      <option value="exercise">Exercise</option>
-      <option value="sleep">Sleep</option>
-    </select>
-    <button id="exportCSV">Export CSV</button>
-    <button id="exportPNG">Export PNG</button>
-  </div>
+<h1>Meet Pulse AI</h1>
+<div id="bpmBig">-- BPM</div>
+<div id="chartContainer">
+  <canvas id="hrChart" width="800" height="320"></canvas>
+  <div class="small" id="lastSeen">Last: --</div>
+</div>
+
+<div class="controls">
+  <button id="startSession">Start Session</button>
+  <button id="stopSession" disabled>Stop & Save</button>
+  <select id="label">
+    <option value="resting">Resting</option>
+    <option value="exercise">Exercise</option>
+    <option value="sleep">Sleep</option>
+  </select>
+  <button id="exportCSV">Export CSV</button>
+  <button id="exportPNG">Export PNG</button>
+</div>
 
 <script>
-  // Replace with your DB root URL (same as in Arduino but without the trailing path)
-  const databaseURL = "https://heart-monitor-fayyaz-default-rtdb.firebaseio.com/";
-  firebase.initializeApp({ databaseURL });
-  const db = firebase.database();
+// --- Firebase config ---
+const firebaseConfig = {
+  databaseURL: "https://heart-rate-monitor-fayyaz-default-rtdb.asia-southeast1.firebasedatabase.app/"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const DEVICE = "device01";
 
-  const DEVICE = "device01";
-  const ctx = document.getElementById('hrChart').getContext('2d');
-  const labels = [], data = [];
-  const chart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [{ label:'BPM', data, borderColor:'rgba(220,20,60,1)', pointRadius:2, fill:false }] },
-    options: { animation:false, scales:{ x:{ display:true }, y:{ min:30, max:220 } } }
+// --- Chart setup ---
+const ctx = document.getElementById('hrChart').getContext('2d');
+const labels = [], data = [];
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [{
+      label: 'BPM',
+      data,
+      borderColor: 'rgba(220,20,60,1)',
+      pointRadius: 2,
+      fill: false
+    }]
+  },
+  options: {
+    animation: false,
+    scales: {
+      x: { display: true },
+      y: { min: 30, max: 220 }
+    }
+  }
+});
+
+// --- Session handling ---
+let sessionId = null, sessionData = [];
+
+document.getElementById('startSession').onclick = () => {
+  sessionId = 's_' + Date.now();
+  sessionData = [];
+  document.getElementById('stopSession').disabled = false;
+};
+
+document.getElementById('stopSession').onclick = async () => {
+  document.getElementById('stopSession').disabled = true;
+  const label = document.getElementById('label').value;
+  await db.ref('sessions/' + DEVICE + '/' + sessionId).set({
+    label,
+    start: sessionId.split('_')[1],
+    readings: sessionData
   });
+  alert('Session saved.');
+};
 
-  let sessionId = null, sessionData = [];
+// --- Listen to new readings in realtime ---
+db.ref('readings/' + DEVICE).limitToLast(200).on('child_added', snap => {
+  const v = snap.val();
+  if (!v) return;
 
-  document.getElementById('startSession').onclick = () => {
-    sessionId = 's_'+Date.now();
-    sessionData = [];
-    document.getElementById('stopSession').disabled = false;
-  };
+  const ts = Number(v.ts) || Date.now();
+  const bpm = Number(v.bpm) || 0;
 
-  document.getElementById('stopSession').onclick = async () => {
-    document.getElementById('stopSession').disabled = true;
-    const label = document.getElementById('label').value;
-    await db.ref('sessions/'+DEVICE+'/'+sessionId).set({ label, start: sessionId.split('_')[1], readings: sessionData });
-    alert('Session saved.');
-  };
+  // Update main BPM display
+  document.getElementById('bpmBig').innerText = bpm > 0 ? bpm + ' BPM' : '-- BPM';
+  document.getElementById('lastSeen').innerText = 'Last: ' + new Date(ts).toLocaleString();
 
-  // Listen for new readings under readings/device01
-  db.ref('readings/'+DEVICE).limitToLast(200).on('child_added', snap => {
-    const v = snap.val();
-    if (!v) return;
-    const ts = Number(v.ts) || Date.now();
-    const bpm = Number(v.bpm) || 0;
+  // Update chart
+  labels.push(new Date(ts).toLocaleTimeString());
+  data.push(bpm);
+  if (labels.length > 120) { labels.shift(); data.shift(); }
+  chart.update();
 
-    // Show BPM
-    document.getElementById('bpmBig').innerText = (bpm > 0 ? bpm + ' BPM' : '-- BPM');
-    document.getElementById('lastSeen').innerText = 'Last: ' + new Date(ts).toLocaleString();
+  // Save session data if active
+  if (sessionId) sessionData.push({ ts, bpm });
+});
 
-    // Chart
-    labels.push(new Date(ts).toLocaleTimeString());
-    data.push(bpm);
-    if (labels.length > 120) { labels.shift(); data.shift(); }
-    chart.update();
-
-    if (sessionId) sessionData.push({ ts, bpm });
+// --- Export CSV ---
+document.getElementById('exportCSV').onclick = async () => {
+  const snap = await db.ref('readings/' + DEVICE).once('value');
+  const rows = [['timestamp_iso','timestamp_ms','bpm']];
+  snap.forEach(child => {
+    const r = child.val();
+    rows.push([new Date(r.ts).toISOString(), r.ts, r.bpm]);
   });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'readings.csv';
+  a.click();
+};
 
-  document.getElementById('exportCSV').onclick = async () => {
-    const snap = await db.ref('readings/'+DEVICE).once('value');
-    const rows = [['timestamp_iso','timestamp_ms','bpm']];
-    snap.forEach(child => {
-      const r = child.val();
-      rows.push([ new Date(r.ts).toISOString(), r.ts, r.bpm ]);
-    });
-    const csv = rows.map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], {type:'text/csv'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'readings.csv'; a.click();
-  };
-
-  document.getElementById('exportPNG').onclick = () => {
-    const url = chart.toBase64Image();
-    const a = document.createElement('a'); a.href = url; a.download = 'chart.png'; a.click();
-  };
+// --- Export PNG ---
+document.getElementById('exportPNG').onclick = () => {
+  const url = chart.toBase64Image();
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'chart.png';
+  a.click();
+};
 </script>
+
 </body>
 </html>
