@@ -1,26 +1,32 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <title>Meet Pulse AI</title>
+  <meta charset="utf-8">
+  <title>Meet Pulse AI — Live</title>
+  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
-    h2 { margin-bottom: 10px; }
-    #chartContainer { width: 90%; max-width: 600px; }
-    #currentHR { margin-top: 10px; font-size: 1.5em; font-weight: bold; text-align: center; }
-    button, select { margin: 5px; padding: 6px 12px; }
+    body{font-family:Arial,margin:0;padding:18px;display:flex;flex-direction:column;align-items:center}
+    h1{margin:0 0 8px 0}
+    #bpmBig{font-size:34px;font-weight:700;margin:6px 0;text-align:center}
+    #chartContainer{width:90%;max-width:800px}
+    canvas{display:block;margin:0 auto}
+    .controls{margin-top:12px;text-align:center}
+    button,select{margin:0 6px;padding:8px 12px}
+    .small{font-size:0.9rem;color:#666}
   </style>
 </head>
 <body>
-  <h2>Meet Pulse AI</h2>
+  <h1>Meet Pulse AI</h1>
+  <div id="bpmBig">-- BPM</div>
   <div id="chartContainer">
-    <canvas id="hrChart"></canvas>
-    <div id="currentHR">Current Heart Rate: -- BPM</div>
+    <canvas id="hrChart" width="800" height="320"></canvas>
+    <div class="small" id="lastSeen">Last: --</div>
   </div>
 
-  <div>
+  <div class="controls">
     <button id="startSession">Start Session</button>
     <button id="stopSession" disabled>Stop & Save</button>
     <select id="label">
@@ -33,17 +39,18 @@
   </div>
 
 <script>
-  const firebaseConfig = { databaseURL: "https://heart-monitor-fayyaz-default-rtdb.firebaseio.com/" };
-  firebase.initializeApp(firebaseConfig);
+  // Replace with your DB root URL (same as in Arduino but without the trailing path)
+  const databaseURL = "https://heart-monitor-fayyaz-default-rtdb.firebaseio.com/";
+  firebase.initializeApp({ databaseURL });
   const db = firebase.database();
-  const DEVICE = "device01";
 
+  const DEVICE = "device01";
   const ctx = document.getElementById('hrChart').getContext('2d');
   const labels = [], data = [];
-  const hrChart = new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [{ label:'BPM', data, borderColor:'red', fill:false }] },
-    options: { animation:false, scales:{ y:{ min:30, max:200 } } }
+    data: { labels, datasets: [{ label:'BPM', data, borderColor:'rgba(220,20,60,1)', pointRadius:2, fill:false }] },
+    options: { animation:false, scales:{ x:{ display:true }, y:{ min:30, max:220 } } }
   });
 
   let sessionId = null, sessionData = [];
@@ -61,31 +68,41 @@
     alert('Session saved.');
   };
 
-  db.ref('readings/'+DEVICE).limitToLast(100).on('child_added', snap => {
+  // Listen for new readings under readings/device01
+  db.ref('readings/'+DEVICE).limitToLast(200).on('child_added', snap => {
     const v = snap.val();
-    if(!v) return;
-    const ts = v.ts || Date.now();
+    if (!v) return;
+    const ts = Number(v.ts) || Date.now();
     const bpm = Number(v.bpm) || 0;
-    document.getElementById('currentHR').innerText = 'Current Heart Rate: ' + bpm + ' BPM';
+
+    // Show BPM
+    document.getElementById('bpmBig').innerText = (bpm > 0 ? bpm + ' BPM' : '-- BPM');
+    document.getElementById('lastSeen').innerText = 'Last: ' + new Date(ts).toLocaleString();
+
+    // Chart
     labels.push(new Date(ts).toLocaleTimeString());
     data.push(bpm);
-    if(labels.length>60){ labels.shift(); data.shift(); }
-    hrChart.update();
-    if(sessionId) sessionData.push({ts,bpm});
+    if (labels.length > 120) { labels.shift(); data.shift(); }
+    chart.update();
+
+    if (sessionId) sessionData.push({ ts, bpm });
   });
 
   document.getElementById('exportCSV').onclick = async () => {
     const snap = await db.ref('readings/'+DEVICE).once('value');
-    const rows = [['timestamp','bpm']];
-    snap.forEach(child => { const r = child.val(); rows.push([new Date(r.ts).toISOString(), r.bpm]); });
-    const csv = rows.map(r=>r.join(',')).join('\n');
+    const rows = [['timestamp_iso','timestamp_ms','bpm']];
+    snap.forEach(child => {
+      const r = child.val();
+      rows.push([ new Date(r.ts).toISOString(), r.ts, r.bpm ]);
+    });
+    const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'readings.csv'; a.click();
   };
 
   document.getElementById('exportPNG').onclick = () => {
-    const url = hrChart.toBase64Image();
+    const url = chart.toBase64Image();
     const a = document.createElement('a'); a.href = url; a.download = 'chart.png'; a.click();
   };
 </script>
