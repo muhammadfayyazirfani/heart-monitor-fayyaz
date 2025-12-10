@@ -1,22 +1,26 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-  <meta charset="utf-8">
-  <title>Heart Monitor (Cloud)</title>
+  <title>Meet Pulse AI</title>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body{font-family:Arial;padding:16px;max-width:900px;margin:auto}
-    #bpmBig{font-size:36px;font-weight:700;margin-bottom:8px}
+    body { font-family: Arial; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
+    h2 { margin-bottom: 10px; }
+    #chartContainer { width: 90%; max-width: 600px; }
+    #currentHR { margin-top: 10px; font-size: 1.5em; font-weight: bold; text-align: center; }
+    button, select { margin: 5px; padding: 6px 12px; }
   </style>
 </head>
 <body>
-  <h1>AI-Style Heart Monitor</h1>
-  <div id="bpmBig">-- BPM</div>
-  <canvas id="chart" width="800" height="300"></canvas>
-  <div style="margin-top:8px">
+  <h2>Meet Pulse AI</h2>
+  <div id="chartContainer">
+    <canvas id="hrChart"></canvas>
+    <div id="currentHR">Current Heart Rate: -- BPM</div>
+  </div>
+
+  <div>
     <button id="startSession">Start Session</button>
     <button id="stopSession" disabled>Stop & Save</button>
     <select id="label">
@@ -29,32 +33,27 @@
   </div>
 
 <script>
-  const firebaseConfig = {
-    databaseURL: "https://heart-monitor-fayyaz-default-rtdb.firebaseio.com/"
-  };
+  const firebaseConfig = { databaseURL: "https://heart-monitor-fayyaz-default-rtdb.firebaseio.com/" };
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-
   const DEVICE = "device01";
 
-  // Chart setup
-  const ctx = document.getElementById('chart').getContext('2d');
+  const ctx = document.getElementById('hrChart').getContext('2d');
   const labels = [], data = [];
-  const myChart = new Chart(ctx, {
+  const hrChart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [{ label: 'BPM', data, borderColor:'red', fill:false }] },
-    options: { animation:false, scales:{ y:{ min: 30, max: 200 } } }
+    data: { labels, datasets: [{ label:'BPM', data, borderColor:'red', fill:false }] },
+    options: { animation:false, scales:{ y:{ min:30, max:200 } } }
   });
 
-  // Session handling
-  let sessionId = null;
-  let sessionData = [];
+  let sessionId = null, sessionData = [];
 
   document.getElementById('startSession').onclick = () => {
     sessionId = 's_'+Date.now();
     sessionData = [];
     document.getElementById('stopSession').disabled = false;
   };
+
   document.getElementById('stopSession').onclick = async () => {
     document.getElementById('stopSession').disabled = true;
     const label = document.getElementById('label').value;
@@ -62,37 +61,31 @@
     alert('Session saved.');
   };
 
-  // listen to new readings in realtime
   db.ref('readings/'+DEVICE).limitToLast(100).on('child_added', snap => {
     const v = snap.val();
     if(!v) return;
     const ts = v.ts || Date.now();
     const bpm = Number(v.bpm) || 0;
-    document.getElementById('bpmBig').innerText = bpm + ' BPM';
+    document.getElementById('currentHR').innerText = 'Current Heart Rate: ' + bpm + ' BPM';
     labels.push(new Date(ts).toLocaleTimeString());
     data.push(bpm);
-    if(labels.length>60){labels.shift();data.shift()}
-    myChart.update();
+    if(labels.length>60){ labels.shift(); data.shift(); }
+    hrChart.update();
     if(sessionId) sessionData.push({ts,bpm});
   });
 
-  // Export CSV
   document.getElementById('exportCSV').onclick = async () => {
     const snap = await db.ref('readings/'+DEVICE).once('value');
     const rows = [['timestamp','bpm']];
-    snap.forEach(child=>{
-      const r = child.val();
-      rows.push([new Date(r.ts).toISOString(), r.bpm]);
-    });
+    snap.forEach(child => { const r = child.val(); rows.push([new Date(r.ts).toISOString(), r.bpm]); });
     const csv = rows.map(r=>r.join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'readings.csv'; a.click();
   };
 
-  // Export PNG
   document.getElementById('exportPNG').onclick = () => {
-    const url = myChart.toBase64Image();
+    const url = hrChart.toBase64Image();
     const a = document.createElement('a'); a.href = url; a.download = 'chart.png'; a.click();
   };
 </script>
